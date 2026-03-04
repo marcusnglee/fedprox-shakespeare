@@ -3,9 +3,9 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "quickstart-pytorch"
+name = "fedprox-shakespeare"
 version = "1.0.1"
-description = "Federated Learning with PyTorch and Flower (Quickstart Example)"
+description = "Federated Learning on Shakespeare dataset using FedProx and Flower"
 license = "Apache-2.0"
 dependencies = [
     "flwr[simulation]>=1.26.0",
@@ -15,10 +15,10 @@ dependencies = [
 ]
 
 [tool.hatch.build.targets.wheel]
-packages = ["."]
+packages = ["pytorchexample"]
 
 [tool.flwr.app]
-publisher = "flwrlabs"
+publisher = "cous"
 
 [tool.flwr.app.components]
 serverapp = "pytorchexample.server_app:app"

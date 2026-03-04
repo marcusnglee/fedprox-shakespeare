@@ -1,11 +1,9 @@
 """pytorchexample: A Flower / PyTorch app."""
-t
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from datasets import load_dataset, Dataset
-from flwr_datasets import FederatedDataset
-from flwr_datasets.partitioner import ContinuousPartitioner
+from flwr_datasets.partitioner import NaturalIdPartitioner
 from torch.utils.data import DataLoader
 from torchvision.transforms import Compose, Normalize, ToTensor
 import pandas as pd
@@ -33,7 +31,7 @@ class Net(nn.Module):
         return self.fc3(x)
 
 
-fds = None  # Cache FederatedDataset
+partitioner = None  # Cache partitioner
 
 pytorch_transforms = Compose([ToTensor(), Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))])
 
@@ -47,16 +45,20 @@ def apply_transforms(batch):
 def load_data(partition_id: int, num_partitions: int, batch_size: int):
     """Load partition CIFAR10 data."""
     # Only initialize `FederatedDataset` once
-    global fds
-    if fds is None:
-        partitioner = IidPartitioner(num_partitions=num_partitions)
-        fds = FederatedDataset(
-            dataset="uoft-cs/cifar10",
-            partitioners={"train": partitioner},
-        )
-    partition = fds.load_partition(partition_id)
+    global partitioner
+    if partitioner is None:
+        df = pd.read_csv('./data/Shakespeare_cleaned.csv')
+        hf_dataset = Dataset.from_pandas(df)
+        # make partitioner 
+        partitioner = NaturalIdPartitioner(partition_by="Player")
+        partitioner.dataset = hf_dataset
+    
+    # load partition 
+    partition = partitioner.load_partition(partition_id)
+    
     # Divide data on each node: 80% train, 20% test
-    partition_train_test = partition.train_test_split(test_size=0.2, seed=42)
+    partition_train_test = partition.train_test_split(test_size=0.2, seed=67)
+    
     # Construct dataloaders
     partition_train_test = partition_train_test.with_transform(apply_transforms)
     trainloader = DataLoader(
@@ -109,39 +111,6 @@ def test(net, testloader, device):
     accuracy = correct / len(testloader.dataset)
     loss = loss / len(testloader)
     return loss, accuracy
-
-def partition():
-    df = pd.read_csv('../data/Shakespeare_cleaned.csv')
-    hf_dataset = Dataset.from_pandas(df)
-    
-    # there are 843 unique players
-    partitioner = ContinuousPartitioner(
-        num_partitions=843,
-        partition_by="Player",
-        strictness=1,
-        shuffle=True # note: test set will be based on chronologically
-    )
-    partitioner.dataset = hf_dataset
-
-    # test partitioner and visualize
-    partition_sizes = []
-    player_names = []
-    for i in range(843):
-        partition = partitioner.load_partition(i)
-        partition_df = partition.to_pandas()
-        player_names.append(partition_df['Player'].iloc[0])
-        partition_sizes.append(len(partition_df))
-
-    size_series = pd.Series(partition_sizes, index=player_names).sort_values(ascending=False)
-
-    # Plot
-    plt.figure(figsize=(14, 5))
-    size_series.head(30).plot(kind='bar', color='steelblue')
-    plt.title('Top 30 Players by Line Count (via ContinuousPartitioner)')
-    plt.xlabel('Player')
-    plt.ylabel('Number of Lines')
-    plt.xticks(rotation=45, ha='right')
-    plt.tight_layout()
-    plt.show()    
+ 
 
     
