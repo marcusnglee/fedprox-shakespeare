@@ -11,31 +11,38 @@ import matplotlib.pyplot as plt
 
 
 class Net(nn.Module):
-    """Model (simple CNN adapted from 'PyTorch: A 60 Minute Blitz')"""
-
+    ''' LSTM model
+    8-dimensional character embedding, 
+    2 LSTM layers with 256 hidden units,
+    vocabulary of 95 unique characters (printable ASCII range).
+    note: paper only has 80, but this might not be the same dataset
+    '''
     def __init__(self):
         super(Net, self).__init__()
-        self.conv1 = nn.Conv2d(3, 6, 5)
-        self.pool = nn.MaxPool2d(2, 2)
-        self.conv2 = nn.Conv2d(6, 16, 5)
-        self.fc1 = nn.Linear(16 * 5 * 5, 120)
-        self.fc2 = nn.Linear(120, 84)
-        self.fc3 = nn.Linear(84, 10)
 
-    def forward(self, x):
-        x = self.pool(F.relu(self.conv1(x)))
-        x = self.pool(F.relu(self.conv2(x)))
-        x = x.view(-1, 16 * 5 * 5)
-        x = F.relu(self.fc1(x))
-        x = F.relu(self.fc2(x))
-        return self.fc3(x)
+        # vocab of 95 letters into 8-dim vector
+        self.embedding = nn.Embedding(95, 8)
+        
+        self.lstm = nn.LSTM(
+            input_size=8,
+            hidden_size=256,
+            num_layers=2,
+            batch_first=True,
+        )
+        self.fc = nn.Linear(256, 95)
+
+    def forward(self, x, hidden=None):
+        # x: (batch, seq_len) of character indices
+        embeds = self.embedding(x)            # (batch, seq_len, embed_dim)
+        out, hidden = self.lstm(embeds, hidden)  # out: (batch, seq_len, hidden_dim)
+        logits = self.fc(out)                 # (batch, seq_len, vocab_size)
+        return logits, hidden
 
 
 partitioner = None  # Cache partitioner
-
 pytorch_transforms = Compose([ToTensor(), Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))])
 
-
+# TODO
 def apply_transforms(batch):
     """Apply transforms to the partition from FederatedDataset."""
     batch["img"] = [pytorch_transforms(img) for img in batch["img"]]
@@ -44,7 +51,7 @@ def apply_transforms(batch):
 
 def load_data(partition_id: int, num_partitions: int, batch_size: int):
     """Load partition CIFAR10 data."""
-    # Only initialize `FederatedDataset` once
+    # only initialize partitioner once
     global partitioner
     if partitioner is None:
         df = pd.read_csv('./data/Shakespeare_cleaned.csv')
@@ -67,15 +74,16 @@ def load_data(partition_id: int, num_partitions: int, batch_size: int):
     testloader = DataLoader(partition_train_test["test"], batch_size=batch_size)
     return trainloader, testloader
 
-
+# TODO
 def load_centralized_dataset():
     """Load test set and return dataloader."""
     # Load entire test set
-    test_dataset = load_dataset("uoft-cs/cifar10", split="test")
-    dataset = test_dataset.with_format("torch").with_transform(apply_transforms)
+    df = pd.read_csv('./data/Shakepseare_cleaned.csv')
+    dataset = Dataset.from_pandas(df)
+    # TODO: dataset transformations
     return DataLoader(dataset, batch_size=128)
 
-
+# TODO
 def train(net, trainloader, epochs, lr, device):
     """Train the model on the training set."""
     net.to(device)  # move model to GPU if available
@@ -95,7 +103,7 @@ def train(net, trainloader, epochs, lr, device):
     avg_trainloss = running_loss / (epochs * len(trainloader))
     return avg_trainloss
 
-
+# TODO
 def test(net, testloader, device):
     """Validate the model on the test set."""
     net.to(device)
