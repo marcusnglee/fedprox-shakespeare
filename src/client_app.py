@@ -32,7 +32,7 @@ def train(msg: Message, context: Context):
     train_loss = train_fn(
         model,
         trainloader,
-        context.run_config["local-epochs"],
+        context.run_config["e"],
         msg.content["config"]["lr"],
         device,
     )

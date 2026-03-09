@@ -27,6 +27,11 @@ clientapp = "src.client_app:app"
 [tool.flwr.app.config]
 num-server-rounds = 3
 fraction-evaluate = 0.5
-local-epochs = 1
 learning-rate = 0.1
 batch-size = 32
+# client fraction
+c = 0.1
+# local epochs
+e = 2
+# local minibatch size
+b = 128

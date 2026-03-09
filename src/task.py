@@ -1,27 +1,26 @@
 """pytorchexample: A Flower / PyTorch app."""
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
-from datasets import load_dataset, Dataset
+from datasets import Dataset
 from flwr_datasets.partitioner import NaturalIdPartitioner
 from torch.utils.data import DataLoader
-from torchvision.transforms import Compose, Normalize, ToTensor
 import pandas as pd
-import matplotlib.pyplot as plt
+from torch.nn.utils.rnn import pad_sequence
 
+partitioner = None  # Cache partitioner
 
 class Net(nn.Module):
     ''' LSTM model
     8-dimensional character embedding, 
     2 LSTM layers with 256 hidden units,
-    vocabulary of 95 unique characters (printable ASCII range).
+    vocabulary of 96 unique characters (printable ASCII range + padding).
     note: paper only has 80, but this might not be the same dataset
     '''
     def __init__(self):
         super(Net, self).__init__()
 
-        # vocab of 95 letters into 8-dim vector
-        self.embedding = nn.Embedding(95, 8)
+        # vocab of 96 letters into 8-dim vector
+        self.embedding = nn.Embedding(96, 8)
         
         self.lstm = nn.LSTM(
             input_size=8,
@@ -29,28 +28,39 @@ class Net(nn.Module):
             num_layers=2,
             batch_first=True,
         )
-        self.fc = nn.Linear(256, 95)
+        self.fc = nn.Linear(256, 96)
 
     def forward(self, x, hidden=None):
-        # x: (batch, seq_len) of character indices
-        embeds = self.embedding(x)            # (batch, seq_len, embed_dim)
-        out, hidden = self.lstm(embeds, hidden)  # out: (batch, seq_len, hidden_dim)
-        logits = self.fc(out)                 # (batch, seq_len, vocab_size)
-        return logits, hidden
+        
+        embeds = self.embedding(x)         
+        out, _ = self.lstm(embeds, hidden) 
+        logits = self.fc(out)           
+        return logits
 
-
-partitioner = None  # Cache partitioner
-pytorch_transforms = Compose([ToTensor(), Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))])
-
-# TODO
+'''
+transform the player lines into input and targets char arrays (str)
+'''
 def apply_transforms(batch):
-    """Apply transforms to the partition from FederatedDataset."""
-    batch["img"] = [pytorch_transforms(img) for img in batch["img"]]
+    encoded = [encode(line) for line in batch['PlayerLine'] ]
+    batch['input_ids'] = [torch.tensor(line[:-1], dtype=torch.long) for line in encoded]
+    batch['target_ids'] = [torch.tensor(line[1:], dtype=torch.long) for line in encoded]
     return batch
+
+# since lines are not of similar length, pad them with zeroes
+def collate_fn(batch):
+    input_ids = pad_sequence([item['input_ids'] for item in batch], batch_first=True, padding_value=0)
+    target_ids = pad_sequence([item['target_ids'] for item in batch], batch_first=True, padding_value=0)
+    return {"input_ids": input_ids, "target_ids": target_ids}
+
+'''encodes lines into integer list of range (1, 95)'''
+def encode(text: str) -> list[int]:
+    # minus 31 because ascii starts at ord 32
+    # 0 will be our padding value
+    return [ord(c) - 31 for c in text if 0 < ord(c) - 31 < 96] # drop unknown chars
 
 
 def load_data(partition_id: int, num_partitions: int, batch_size: int):
-    """Load partition CIFAR10 data."""
+    """Load partition data."""
     # only initialize partitioner once
     global partitioner
     if partitioner is None:
@@ -69,34 +79,33 @@ def load_data(partition_id: int, num_partitions: int, batch_size: int):
     # Construct dataloaders
     partition_train_test = partition_train_test.with_transform(apply_transforms)
     trainloader = DataLoader(
-        partition_train_test["train"], batch_size=batch_size, shuffle=True
+        partition_train_test["train"], batch_size=batch_size, shuffle=True, collate_fn=collate_fn
     )
-    testloader = DataLoader(partition_train_test["test"], batch_size=batch_size)
+    testloader = DataLoader(partition_train_test["test"], batch_size=batch_size, collate_fn=collate_fn)
     return trainloader, testloader
 
-# TODO
 def load_centralized_dataset():
     """Load test set and return dataloader."""
-    # Load entire test set
-    df = pd.read_csv('./data/Shakepseare_cleaned.csv')
+    # Load entire dataset as test set
+    df = pd.read_csv('./data/Shakespeare_cleaned.csv')
     dataset = Dataset.from_pandas(df)
-    # TODO: dataset transformations
-    return DataLoader(dataset, batch_size=128)
+    dataset = dataset.with_transform(apply_transforms)
+    return DataLoader(dataset, batch_size=128, collate_fn=collate_fn)
 
-# TODO
+"""Train the model on the training set."""
 def train(net, trainloader, epochs, lr, device):
-    """Train the model on the training set."""
     net.to(device)  # move model to GPU if available
-    criterion = torch.nn.CrossEntropyLoss().to(device)
-    optimizer = torch.optim.SGD(net.parameters(), lr=lr, momentum=0.9)
+    criterion = torch.nn.CrossEntropyLoss(ignore_index=0).to(device)
+    optimizer = torch.optim.SGD(net.parameters(), lr=lr)
     net.train()
     running_loss = 0.0
     for _ in range(epochs):
         for batch in trainloader:
-            images = batch["img"].to(device)
-            labels = batch["label"].to(device)
+            input_ids = batch["input_ids"].to(device)
+            target_ids = batch["target_ids"].to(device)
             optimizer.zero_grad()
-            loss = criterion(net(images), labels)
+            # must permute from shape (batch, seq_len, 96) -> (batch, 96, seq_len)
+            loss = criterion(net(input_ids).permute(0, 2, 1), target_ids)
             loss.backward()
             optimizer.step()
             running_loss += loss.item()
@@ -107,18 +116,19 @@ def train(net, trainloader, epochs, lr, device):
 def test(net, testloader, device):
     """Validate the model on the test set."""
     net.to(device)
-    criterion = torch.nn.CrossEntropyLoss()
+    criterion = torch.nn.CrossEntropyLoss(ignore_index=0).to(device)
     correct, loss = 0, 0.0
     with torch.no_grad():
         for batch in testloader:
-            images = batch["img"].to(device)
-            labels = batch["label"].to(device)
-            outputs = net(images)
-            loss += criterion(outputs, labels).item()
-            correct += (torch.max(outputs.data, 1)[1] == labels).sum().item()
-    accuracy = correct / len(testloader.dataset)
-    loss = loss / len(testloader)
+            input_ids = batch["input_ids"].to(device)
+            target_ids = batch["target_ids"].to(device)
+            outputs = net(input_ids)
+            loss += criterion(outputs.permute(0, 2, 1), target_ids).item()
+            # TODO: understand this better
+            preds = torch.max(outputs, dim=2)[1]         # argmax over vocab → (batch, seq_len)
+            mask = target_ids != 0
+            correct += (preds[mask] == target_ids[mask]).sum().item()
+            total_tokens += mask.sum().item()
+    accuracy = correct / total_tokens # divide by number of chars, not lines
+    loss = loss / len(testloader) # avg loss across batch means 
     return loss, accuracy
- 
-
-    

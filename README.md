@@ -14,8 +14,10 @@ and then install necessary packages (within quickstart-python dir)
 ## implementation steps
 - [x] clean data
 - [x] create partitoner to simulate federation: partition clients by 'Player' identifier
-- [ ] make LSTM model architecture ( Net() inside task.py)
-- [ ] implement server code (load global model, set strategy to FedAvg, define global evaluation fn)
+- [x] make LSTM model architecture ( Net() inside task.py)
+- [x] data transformations
+- [x] train and test functions in task.py 
+- [x] implement server code (load global model, set strategy to FedAvg, define global evaluation fn)
 - [ ] client.py (train function, local evaluation fn)
 - [ ] run with different hyperparameters and compare
 pt. 2

@@ -19,13 +19,14 @@ def main(grid: Grid, context: Context) -> None:
     fraction_evaluate: float = context.run_config["fraction-evaluate"]
     num_rounds: int = context.run_config["num-server-rounds"]
     lr: float = context.run_config["learning-rate"]
+    c: float = context.run_config["c"]
 
     # Load global model
     global_model = Net()
     arrays = ArrayRecord(global_model.state_dict())
 
-    # Initialize FedAvg strategy
-    strategy = FedAvg(fraction_evaluate=fraction_evaluate)
+    # Initialize FedAvg strategy with hyperparameter 'c'
+    strategy = FedAvg(fraction_train=c)
 
     # Start strategy, run FedAvg for `num_rounds`
     result = strategy.start(
@@ -40,7 +41,6 @@ def main(grid: Grid, context: Context) -> None:
     print("\nSaving final model to disk...")
     state_dict = result.arrays.to_torch_state_dict()
     torch.save(state_dict, "final_model.pt")
-
 
 def global_evaluate(server_round: int, arrays: ArrayRecord) -> MetricRecord:
     """Evaluate model on central data."""
