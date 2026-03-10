@@ -59,7 +59,7 @@ def encode(text: str) -> list[int]:
     return [ord(c) - 31 for c in text if 0 < ord(c) - 31 < 96] # drop unknown chars
 
 
-def load_data(partition_id: int, num_partitions: int, batch_size: int):
+def load_data(partition_id: int, batch_size: int):
     """Load partition data."""
     # only initialize partitioner once
     global partitioner
@@ -84,13 +84,13 @@ def load_data(partition_id: int, num_partitions: int, batch_size: int):
     testloader = DataLoader(partition_train_test["test"], batch_size=batch_size, collate_fn=collate_fn)
     return trainloader, testloader
 
-def load_centralized_dataset():
+def load_centralized_dataset(batch_size: int):
     """Load test set and return dataloader."""
     # Load entire dataset as test set
     df = pd.read_csv('./data/Shakespeare_cleaned.csv')
     dataset = Dataset.from_pandas(df)
     dataset = dataset.with_transform(apply_transforms)
-    return DataLoader(dataset, batch_size=128, collate_fn=collate_fn)
+    return DataLoader(dataset, batch_size=batch_size, collate_fn=collate_fn)
 
 """Train the model on the training set."""
 def train(net, trainloader, epochs, lr, device):
@@ -117,7 +117,7 @@ def test(net, testloader, device):
     """Validate the model on the test set."""
     net.to(device)
     criterion = torch.nn.CrossEntropyLoss(ignore_index=0).to(device)
-    correct, loss = 0, 0.0
+    correct, loss, total_tokens = 0, 0.0, 0
     with torch.no_grad():
         for batch in testloader:
             input_ids = batch["input_ids"].to(device)
